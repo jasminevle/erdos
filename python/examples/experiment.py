@@ -26,7 +26,7 @@ class SendOp(erdos.Operator):
         count = 0
         max_msgs = self.duration*self.frequency
         while count < max_msgs:
-            timestamp = erdos.Timestamp(coordinates=[round(count / frequency * 1000)])
+            timestamp = erdos.Timestamp(coordinates=[round(count / self.frequency * 1000)])
             msg = erdos.Message(timestamp, (time.time(), count))
 
             print("{name}: sending {msg}".format(name=self.config.name, msg=msg))
@@ -52,8 +52,8 @@ class MostPermissiveJoinOp(erdos.Operator):
         self.logger = utils.setup_csv_logging("most permissive completeness and cardinality",
                                               log_file=log_file)
 
-        erdos.add_callback([left_stream], [write_stream], self.recv_left)
-        erdos.add_callback([right_stream], [write_stream], self.recv_right)
+        left_stream.add_callback(self.recv_left, [write_stream])
+        right_stream.add_callback(self.recv_right, [write_stream])
 
     # TODO: use a callback on a stateful read stream instead of passing self
     def recv_left(self, msg, write_stream):
@@ -86,7 +86,7 @@ class MostPermissiveJoinOp(erdos.Operator):
         for right_msg in self.right_msgs:
             self.right_duplcnt += 1
             timestamp = msg.timestamp
-            joined_msg = erdos.Message(timestamp, (msg.data[0], right_msg.data[0]))
+            joined_msg = erdos.Message(timestamp, (msg.data[0], msg.timestamp, right_msg.data[0], right_msg.timestamp))
             self.count_and_log()
             print("MostPermissiveJoinOp: sending {joined_msg}".format(joined_msg=joined_msg))
             write_stream.send(joined_msg)
@@ -96,7 +96,7 @@ class MostPermissiveJoinOp(erdos.Operator):
         for left_msg in self.left_msgs:
             self.left_duplcnt += 1
             timestamp = msg.timestamp
-            joined_msg = erdos.Message(timestamp, (msg.data[0], left_msg.data[0]))
+            joined_msg = erdos.Message(timestamp, (left_msg.data[0], left_msg.timestamp, msg.data[0], msg.timestamp))
             self.count_and_log()
             print("MostPermissiveJoinOp: sending {joined_msg}".format(joined_msg=joined_msg))
             write_stream.send(joined_msg)
@@ -116,8 +116,8 @@ class TimestampJoinOp(erdos.Operator):
         self.joincnt = 0
         self.logger = utils.setup_csv_logging("timestamp completeness and cardinality",
                                               log_file=log_file)
-        left_stream.add_callback(self.recv_left)
-        right_stream.add_callback(self.recv_right)
+        left_stream.add_callback(self.recv_left, [write_stream])
+        right_stream.add_callback(self.recv_right, [write_stream])
         erdos.add_watermark_callback([left_stream, right_stream],
                                      [write_stream], self.send_joined)
 
@@ -146,11 +146,13 @@ class TimestampJoinOp(erdos.Operator):
                 ))
 
     def send_joined(self, timestamp, write_stream):
+        if self.left_msgs.get(timestamp) is None or self.right_msgs.get(timestamp) is None:
+            return
         left_msg = self.left_msgs.pop(timestamp)
         right_msg = self.right_msgs.pop(timestamp)
         self.left_usedcnt += 1
         self.right_usedcnt += 1
-        joined_msg = erdos.Message(timestamp, (left_msg.data[0], right_msg.data[0]))
+        joined_msg = erdos.Message(timestamp, (left_msg.data[0], left_msg.timestamp, right_msg.data[0], right_msg.timestamp))
         print("TimestampJoinOp: sending {joined_msg}".format(joined_msg=joined_msg))
         write_stream.send(joined_msg)
 
@@ -170,18 +172,22 @@ class RecentNoDuplJoinOp(erdos.Operator):
         self.logger = utils.setup_csv_logging("recent on dupl completeness and cardinality",
                                               log_file=log_file)
 
-        erdos.add_callback([left_stream], [write_stream], self.recv_left)
-        erdos.add_callback([right_stream], [write_stream], self.recv_right)
+        left_stream.add_callback(self.recv_left, [write_stream])
+        right_stream.add_callback(self.recv_right, [write_stream])
 
     # TODO: use a callback on a stateful read stream instead of passing self
     def recv_left(self, msg, write_stream):
         print("RecentNoDuplJoinOp: received {msg} on left stream".format(msg=msg))
+        if len(self.left_msgs) == 0:
+            self.left_msgs.append(msg)
         self.left_msgs[0] = msg
         self.left_reccnt += 1
         self.send_joined(write_stream)
 
     def recv_right(self, msg, write_stream):
         print("RecentNoDuplJoinOp: received {msg} on right stream".format(msg=msg))
+        if len(self.right_msgs) == 0:
+            self.right_msgs.append(msg)
         self.right_msgs[0] = msg
         self.right_reccnt += 1
         self.send_joined(write_stream)
@@ -203,10 +209,10 @@ class RecentNoDuplJoinOp(erdos.Operator):
         if len(self.left_msgs) == 0 or len(self.right_msgs) == 0:
             return
         left_msg, right_msg = self.left_msgs.pop(0), self.right_msgs.pop(0)
-        self.left_used += 1
-        self.right_used += 1
+        self.left_usedcnt += 1
+        self.right_usedcnt += 1
         timestamp = max(left_msg.timestamp, right_msg.timestamp)
-        joined_msg = erdos.Message(timestamp, (left_msg.data[0], right_msg.data[0]))
+        joined_msg = erdos.Message(timestamp, (left_msg.data[0], left_msg.timestamp, right_msg.data[0], right_msg.timestamp))
         self.count_and_log()
         print("RecentNoDuplJoinOp: sending {joined_msg}".format(joined_msg=joined_msg))
         write_stream.send(joined_msg)
@@ -227,8 +233,8 @@ class PermissiveRecentJoinOp(erdos.Operator):
         self.logger = utils.setup_csv_logging("permissive recent completeness and cardinality",
                                               log_file=log_file)
 
-        erdos.add_callback([left_stream], [write_stream], self.recv_left)
-        erdos.add_callback([right_stream], [write_stream], self.recv_right)
+        left_stream.add_callback(self.recv_left, [write_stream])
+        right_stream.add_callback(self.recv_right, [write_stream])
 
     # TODO: use a callback on a stateful read stream instead of passing self
     def recv_left(self, msg, write_stream):
@@ -262,7 +268,7 @@ class PermissiveRecentJoinOp(erdos.Operator):
         for right_msg in self.right_msgs:
             self.right_duplcnt += 1
             timestamp = msg.timestamp
-            joined_msg = erdos.Message(timestamp, (msg.data[0], right_msg.data[0]))
+            joined_msg = erdos.Message(timestamp, (msg.data[0], msg.timestamp, right_msg.data[0], right_msg.timestamp))
             self.count_and_log()
             print("PermissiveRecentJoinOp: sending {joined_msg}".format(joined_msg=joined_msg))
             write_stream.send(joined_msg)
@@ -276,7 +282,7 @@ class PermissiveRecentJoinOp(erdos.Operator):
         for left_msg in self.left_msgs:
             self.left_duplcnt += 1
             timestamp = msg.timestamp
-            joined_msg = erdos.Message(timestamp, (msg.data[0], left_msg.data[0]))
+            joined_msg = erdos.Message(timestamp, (left_msg.data[0], left_msg.timestamp, msg.data[0], msg.timestamp))
             self.count_and_log()
             print("PermissiveRecentJoinOp: sending {joined_msg}".format(joined_msg=joined_msg))
             write_stream.send(joined_msg)
@@ -300,10 +306,9 @@ class MeasurementOp(erdos.Operator):
         current_time = time.time()
 
         print("MeasurementOp: receiving {msg}".format(msg=msg))
-        left_data, right_data = msg.data[0], msg.data[1]
-        left_time, right_time = left_data[0], right_data[0]
+        left_time, right_time = msg.data[0], msg.data[2]
         
-        timestamp = msg.timestamp
+        timestamp = max(left_time, right_time)
         difference = abs(left_time-right_time)
         left_recency = abs(left_time-current_time)
         right_recency = abs(right_time-current_time)
@@ -312,7 +317,7 @@ class MeasurementOp(erdos.Operator):
         msg = erdos.Message(msg.timestamp, data)
         self.logger.warning(
             "{timestamp}, {time_difference}, {left_recency}, {right_recency}".format(
-                timestamp = msg.timestamp,
+                timestamp = timestamp,
                 time_difference=difference,
                 left_recency=left_recency,
                 right_recency=right_recency
@@ -329,9 +334,8 @@ class MeasurementOp(erdos.Operator):
 def main():
     """Creates and runs the dataflow graph."""
     f_1, f_2, d_1, d_2 = 1, 2, 100, 100
-    #1 = permissive recent, 2 = recent with no duplicates, 3 = timestamp
-    jointype = 3
     log_file = "timestamp join time output"
+    #MostPermissiveJoinOp, TimestampJoinOp, RecentNoDuplJoinOp, PermissiveRecentJoinOp
 
     (left_stream, ) = erdos.connect(SendOp,
                                     erdos.OperatorConfig(name="F_1SendOp"), [],
@@ -340,9 +344,9 @@ def main():
                                      erdos.OperatorConfig(name="F_2SendOp"),
                                      [],
                                      frequency=f_2, duration=d_2)
-    (join_stream, ) = erdos.connect(TimestampJoinOp,
+    (join_stream, ) = erdos.connect(MostPermissiveJoinOp,
                                     erdos.OperatorConfig(),
-                                    [left_stream, right_stream], jointype=jointype, log_file=log_file)
+                                    [left_stream, right_stream], log_file=log_file)
     (time_stream, ) = erdos.connect(MeasurementOp,
                                     erdos.OperatorConfig(), [join_stream])
     erdos.run()

@@ -51,7 +51,13 @@ class MostPermissiveJoinOp(erdos.Operator):
         self.joincnt = 0
         self.logger = utils.setup_csv_logging("most permissive completeness and cardinality",
                                               log_file=log_file)
-
+        self.logger.warning("{join_type},{left_freq},{left_duration},{right_freq},{right_duration}".format(
+            join_type="MostPermissiveJoinOp",
+            left_freq=f_1,
+            left_duration=d_1,
+            right_freq=f_2,
+            right_duration=d_2
+            ))
         left_stream.add_callback(self.recv_left, [write_stream])
         right_stream.add_callback(self.recv_right, [write_stream])
 
@@ -116,6 +122,13 @@ class TimestampJoinOp(erdos.Operator):
         self.joincnt = 0
         self.logger = utils.setup_csv_logging("timestamp completeness and cardinality",
                                               log_file=log_file)
+        self.logger.warning("{join_type},{left_freq},{left_duration},{right_freq},{right_duration}".format(
+            join_type="TimestampJoinOp",
+            left_freq=f_1,
+            left_duration=d_1,
+            right_freq=f_2,
+            right_duration=d_2
+            ))
         left_stream.add_callback(self.recv_left, [write_stream])
         right_stream.add_callback(self.recv_right, [write_stream])
         erdos.add_watermark_callback([left_stream, right_stream],
@@ -171,6 +184,13 @@ class RecentNoDuplJoinOp(erdos.Operator):
         self.joincnt = 0
         self.logger = utils.setup_csv_logging("recent on dupl completeness and cardinality",
                                               log_file=log_file)
+        self.logger.warning("{join_type},{left_freq},{left_duration},{right_freq},{right_duration}".format(
+            join_type="RecentNoDuplJoinOp",
+            left_freq=f_1,
+            left_duration=d_1,
+            right_freq=f_2,
+            right_duration=d_2
+            ))
 
         left_stream.add_callback(self.recv_left, [write_stream])
         right_stream.add_callback(self.recv_right, [write_stream])
@@ -232,6 +252,13 @@ class PermissiveRecentJoinOp(erdos.Operator):
         self.joincnt = 0
         self.logger = utils.setup_csv_logging("permissive recent completeness and cardinality",
                                               log_file=log_file)
+        self.logger.warning("{join_type},{left_freq},{left_duration},{right_freq},{right_duration}".format(
+            join_type="PermissiveRecentJoinOp",
+            left_freq=f_1,
+            left_duration=d_1,
+            right_freq=f_2,
+            right_duration=d_2
+            ))
 
         left_stream.add_callback(self.recv_left, [write_stream])
         right_stream.add_callback(self.recv_right, [write_stream])
@@ -301,6 +328,12 @@ class MeasurementOp(erdos.Operator):
         read_stream.add_callback(self.callback, [write_stream])
         self.logger = utils.setup_csv_logging("time data",
                                               log_file="time data")
+        self.logger.warning("{left_freq},{left_duration},{right_freq},{right_duration}".format(
+            left_freq=f_1,
+            left_duration=d_1,
+            right_freq=f_2,
+            right_duration=d_2
+            ))
 
     def callback(self, msg, write_stream):
         current_time = time.time()
@@ -330,10 +363,10 @@ class MeasurementOp(erdos.Operator):
     def connect(read_stream):
         return [erdos.WriteStream()]
 
+f_1, f_2, d_1, d_2 = 1, 2, 100, 100
 
 def main():
     """Creates and runs the dataflow graph."""
-    f_1, f_2, d_1, d_2 = 1, 2, 100, 100
     log_file = "timestamp join time output"
     #MostPermissiveJoinOp, TimestampJoinOp, RecentNoDuplJoinOp, PermissiveRecentJoinOp
 

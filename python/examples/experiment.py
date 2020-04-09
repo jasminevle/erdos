@@ -1,11 +1,7 @@
-"""Merges messages from two senders based on message number (count).
-A MeasurementOp finds the difference between the max system time and the min system time
-of the two timestamps in a joined message.
-If logical time is used for timestamps, the difference is in seconds.
-If system time is used for timestamps, the difference is in microseconds.
-"""
-
+from multiprocessing import Process
 import time
+import os
+import signal
 
 from erdos import utils
 import erdos
@@ -51,13 +47,7 @@ class MostPermissiveJoinOp(erdos.Operator):
         self.joincnt = 0
         self.logger = utils.setup_csv_logging("most permissive completeness and cardinality",
                                               log_file=log_file)
-        self.logger.warning("{join_type},{left_freq},{left_duration},{right_freq},{right_duration}".format(
-            join_type="MostPermissiveJoinOp",
-            left_freq=f_1,
-            left_duration=d_1,
-            right_freq=f_2,
-            right_duration=d_2
-            ))
+        self.logger.warning("left_total, left_used, left_duplicated, right_total, right_used, right_duplicated, cardinality")
         left_stream.add_callback(self.recv_left, [write_stream])
         right_stream.add_callback(self.recv_right, [write_stream])
 
@@ -122,15 +112,9 @@ class TimestampJoinOp(erdos.Operator):
         self.joincnt = 0
         self.logger = utils.setup_csv_logging("timestamp completeness and cardinality",
                                               log_file=log_file)
-        self.logger.warning("{join_type},{left_freq},{left_duration},{right_freq},{right_duration}".format(
-            join_type="TimestampJoinOp",
-            left_freq=f_1,
-            left_duration=d_1,
-            right_freq=f_2,
-            right_duration=d_2
-            ))
-        left_stream.add_callback(self.recv_left, [write_stream])
-        right_stream.add_callback(self.recv_right, [write_stream])
+        self.logger.warning("left_total, left_used, left_duplicated, right_total, right_used, right_duplicated, cardinality")
+        left_stream.add_callback(self.recv_left)
+        right_stream.add_callback(self.recv_right)
         erdos.add_watermark_callback([left_stream, right_stream],
                                      [write_stream], self.send_joined)
 
@@ -166,6 +150,7 @@ class TimestampJoinOp(erdos.Operator):
         self.left_usedcnt += 1
         self.right_usedcnt += 1
         joined_msg = erdos.Message(timestamp, (left_msg.data[0], left_msg.timestamp, right_msg.data[0], right_msg.timestamp))
+        self.count_and_log()
         print("TimestampJoinOp: sending {joined_msg}".format(joined_msg=joined_msg))
         write_stream.send(joined_msg)
 
@@ -184,13 +169,7 @@ class RecentNoDuplJoinOp(erdos.Operator):
         self.joincnt = 0
         self.logger = utils.setup_csv_logging("recent on dupl completeness and cardinality",
                                               log_file=log_file)
-        self.logger.warning("{join_type},{left_freq},{left_duration},{right_freq},{right_duration}".format(
-            join_type="RecentNoDuplJoinOp",
-            left_freq=f_1,
-            left_duration=d_1,
-            right_freq=f_2,
-            right_duration=d_2
-            ))
+        self.logger.warning("left_total, left_used, left_duplicated, right_total, right_used, right_duplicated, cardinality")
 
         left_stream.add_callback(self.recv_left, [write_stream])
         right_stream.add_callback(self.recv_right, [write_stream])
@@ -252,13 +231,7 @@ class PermissiveRecentJoinOp(erdos.Operator):
         self.joincnt = 0
         self.logger = utils.setup_csv_logging("permissive recent completeness and cardinality",
                                               log_file=log_file)
-        self.logger.warning("{join_type},{left_freq},{left_duration},{right_freq},{right_duration}".format(
-            join_type="PermissiveRecentJoinOp",
-            left_freq=f_1,
-            left_duration=d_1,
-            right_freq=f_2,
-            right_duration=d_2
-            ))
+        self.logger.warning("left_total, left_used, left_duplicated, right_total, right_used, right_duplicated, cardinality")
 
         left_stream.add_callback(self.recv_left, [write_stream])
         right_stream.add_callback(self.recv_right, [write_stream])
@@ -324,16 +297,11 @@ class PermissiveRecentJoinOp(erdos.Operator):
 
 
 class MeasurementOp(erdos.Operator):
-    def __init__(self, read_stream, write_stream):
+    def __init__(self, read_stream, write_stream, log_file):
         read_stream.add_callback(self.callback, [write_stream])
         self.logger = utils.setup_csv_logging("time data",
-                                              log_file="time data")
-        self.logger.warning("{left_freq},{left_duration},{right_freq},{right_duration}".format(
-            left_freq=f_1,
-            left_duration=d_1,
-            right_freq=f_2,
-            right_duration=d_2
-            ))
+                                              log_file=log_file)
+        self.logger.warning("timestamp, time_difference, left_recency, right_recency")
 
     def callback(self, msg, write_stream):
         current_time = time.time()
@@ -363,26 +331,46 @@ class MeasurementOp(erdos.Operator):
     def connect(read_stream):
         return [erdos.WriteStream()]
 
-f_1, f_2, d_1, d_2 = 1, 2, 100, 100
+
+def run_experiment(join_type, left_freq, right_freq, duration_secs=100):
+    if join_type == "MostPermissive":
+        join = MostPermissiveJoinOp
+    elif join_type == "Timestamp":
+        join = TimestampJoinOp
+    elif join_type == "RecentNoDupl":
+        join = RecentNoDuplJoinOp
+    elif join_type == "PermissiveRecent":
+        join = PermissiveRecentJoinOp
+
+    join_log_file = join_type + "counts" + "_leftfreq_" + str(left_freq) + "_rightfreq_" + str(right_freq) + "_duration_" + str(duration_secs)
+    measurement_log_file = join_type + "times" + "_leftfreq_" + str(left_freq) + "_rightfreq_" + str(right_freq) + "_duration_" + str(duration_secs)
+
+    """Creates and runs the dataflow graph."""
+    (left_stream, ) = erdos.connect(SendOp,
+                                    erdos.OperatorConfig(name="LeftSendOp"), [],
+                                    frequency=left_freq, duration=duration_secs)
+    (right_stream, ) = erdos.connect(SendOp,
+                                     erdos.OperatorConfig(name="RightSendOp"), [],
+                                     frequency=right_freq, duration=duration_secs)
+    (join_stream, ) = erdos.connect(join,
+                                    erdos.OperatorConfig(),
+                                    [left_stream, right_stream], log_file=join_log_file)
+    (time_stream, ) = erdos.connect(MeasurementOp,
+                                    erdos.OperatorConfig(), [join_stream], log_file=measurement_log_file)
+    erdos.run()
+
 
 def main():
-    """Creates and runs the dataflow graph."""
-    log_file = "timestamp join time output"
-    #MostPermissiveJoinOp, TimestampJoinOp, RecentNoDuplJoinOp, PermissiveRecentJoinOp
-
-    (left_stream, ) = erdos.connect(SendOp,
-                                    erdos.OperatorConfig(name="F_1SendOp"), [],
-                                    frequency=f_1, duration=d_1)
-    (right_stream, ) = erdos.connect(SendOp,
-                                     erdos.OperatorConfig(name="F_2SendOp"),
-                                     [],
-                                     frequency=f_2, duration=d_2)
-    (join_stream, ) = erdos.connect(MostPermissiveJoinOp,
-                                    erdos.OperatorConfig(),
-                                    [left_stream, right_stream], log_file=log_file)
-    (time_stream, ) = erdos.connect(MeasurementOp,
-                                    erdos.OperatorConfig(), [join_stream])
-    erdos.run()
+    join_types = ["Timestamp", "RecentNoDupl", "PermissiveRecent", "MostPermissive"]
+    for join_type in join_types:
+        for left_freq in range(1, 11):
+            for right_freq in range(left_freq, 11):
+                # p = Process(target=run_experiment, args=(join_type, left_freq, right_freq))
+                # p.start()
+                # time.sleep(12)
+                # for child in p.children(recursive=True):
+                #     child.kill()
+                # TO DO: spawn dataflow graph creation process, then terminate it and its children processes
 
 
 if __name__ == "__main__":

@@ -342,8 +342,8 @@ def run_experiment(join_type, left_freq, right_freq, duration_secs=100):
     elif join_type == "PermissiveRecent":
         join = PermissiveRecentJoinOp
 
-    join_log_file = join_type + "counts" + "_leftfreq_" + str(left_freq) + "_rightfreq_" + str(right_freq) + "_duration_" + str(duration_secs)
-    measurement_log_file = join_type + "times" + "_leftfreq_" + str(left_freq) + "_rightfreq_" + str(right_freq) + "_duration_" + str(duration_secs)
+    join_log_file = join_type + "_leftfreq_" + str(left_freq) + "_rightfreq_" + str(right_freq) + "_duration_" + str(duration_secs) + "_counts" 
+    measurement_log_file = join_type + "_leftfreq_" + str(left_freq) + "_rightfreq_" + str(right_freq) + "_duration_" + str(duration_secs) + "_times"
 
     """Creates and runs the dataflow graph."""
     (left_stream, ) = erdos.connect(SendOp,
@@ -357,20 +357,18 @@ def run_experiment(join_type, left_freq, right_freq, duration_secs=100):
                                     [left_stream, right_stream], log_file=join_log_file)
     (time_stream, ) = erdos.connect(MeasurementOp,
                                     erdos.OperatorConfig(), [join_stream], log_file=measurement_log_file)
-    erdos.run()
-
+    node_handle = erdos.run_async()
+    time.sleep(15)
+    node_handle.shutdown()
+    erdos.reset()
+    return
 
 def main():
     join_types = ["Timestamp", "RecentNoDupl", "PermissiveRecent", "MostPermissive"]
     for join_type in join_types:
         for left_freq in range(1, 11):
             for right_freq in range(left_freq, 11):
-                # p = Process(target=run_experiment, args=(join_type, left_freq, right_freq))
-                # p.start()
-                # time.sleep(12)
-                # for child in p.children(recursive=True):
-                #     child.kill()
-                # TO DO: spawn dataflow graph creation process, then terminate it and its children processes
+                run_experiment(join_type, left_freq, right_freq)
 
 
 if __name__ == "__main__":

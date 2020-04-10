@@ -38,13 +38,18 @@ extern crate abomonation_derive;
 extern crate bincode;
 extern crate clap;
 #[macro_use]
-extern crate slog;
+extern crate lazy_static;
+#[macro_use]
+pub extern crate slog;
 extern crate slog_term;
+pub extern crate tokio;
 
 // Libraries used in this file.
 use clap::{App, Arg};
 use rand::{Rng, SeedableRng, StdRng};
 use serde::{Deserialize, Serialize};
+use slog::{Drain, Logger};
+use slog_term::term_full;
 use std::{cell::RefCell, fmt};
 use uuid;
 
@@ -138,11 +143,12 @@ macro_rules! make_operator_executor {
             )*
             // After: $rs is an identifier pointing to ReadStream
             // $ws is an identifier pointing to WriteStream
-            let config = $config.clone();
+            let mut config = $config.clone();
+            config.node_id = channel_manager.lock().unwrap().node_id();
             let flow_watermarks = config.flow_watermarks;
             let logger = $crate::get_terminal_logger();
             // TODO: set operator name?
-            let mut op = $crate::make_operator!($t, $config, ($($rs),*), ($($ws),*));
+            let mut op = $crate::make_operator!($t, config.clone(), ($($rs),*), ($($ws),*));
             // Pass on watermarks
             if flow_watermarks {
                 $crate::flow_watermarks!(($($rs),*), ($($ws),*));
@@ -166,8 +172,6 @@ macro_rules! make_operator_executor {
 #[macro_export]
 macro_rules! imports {
     () => {
-        extern crate slog;
-        extern crate tokio;
         use std::{
             cell::RefCell,
             rc::Rc,
@@ -175,7 +179,8 @@ macro_rules! imports {
             thread,
             time::Duration,
         };
-        use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+        use $crate::slog;
+        use $crate::tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
         use $crate::{
             self,
             communication::ControlMessage,
@@ -406,12 +411,22 @@ impl fmt::Display for Uuid {
     }
 }
 
+/// Resets seed and creates a new dataflow graph.
+pub fn reset() {
+    // All global variables should be reset here.
+    RNG.with(|rng| {
+        *rng.borrow_mut() = StdRng::from_seed(&[1913, 03, 26]);
+    });
+    dataflow::graph::default_graph::set(dataflow::graph::Graph::new());
+}
+
+lazy_static! {
+    static ref TERMINAL_LOGGER: Logger =
+        Logger::root(std::sync::Mutex::new(term_full()).fuse(), o!());
+}
+
 pub fn get_terminal_logger() -> slog::Logger {
-    use slog::Drain;
-    use slog::Logger;
-    use slog_term::term_full;
-    use std::sync::Mutex;
-    Logger::root(Mutex::new(term_full()).fuse(), o!())
+    TERMINAL_LOGGER.clone()
 }
 
 pub fn new_app(name: &str) -> clap::App {

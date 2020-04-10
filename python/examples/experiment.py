@@ -28,11 +28,6 @@ class SendOp(erdos.Operator):
             print("{name}: sending {msg}".format(name=self.config.name, msg=msg))
             self.write_stream.send(msg)
 
-            watermark = erdos.WatermarkMessage(timestamp)
-            print("{name}: sending watermark {watermark}".format(
-                name=self.config.name, watermark=watermark))
-            self.write_stream.send(watermark)
-
             count += 1
             time.sleep(1 / self.frequency)
 
@@ -47,7 +42,7 @@ class MostPermissiveJoinOp(erdos.Operator):
         self.joincnt = 0
         self.logger = utils.setup_csv_logging("most permissive completeness and cardinality",
                                               log_file=log_file)
-        self.logger.warning("left_total, left_used, left_duplicated, right_total, right_used, right_duplicated, cardinality")
+        self.logger.warning("left_total,left_used,left_duplicated,right_total,right_used,right_duplicated,cardinality")
         left_stream.add_callback(self.recv_left, [write_stream])
         right_stream.add_callback(self.recv_right, [write_stream])
 
@@ -67,7 +62,7 @@ class MostPermissiveJoinOp(erdos.Operator):
     def count_and_log(self):
         self.joincnt += 1
         self.logger.warning(
-            "{left_total}, {left_used}, {left_duplicated}, {right_total}, {right_used}, {right_duplicated}, {cardinality}".format(
+            "{left_total},{left_used},{left_duplicated},{right_total},{right_used},{right_duplicated},{cardinality}".format(
                 left_total=self.left_reccnt,
                 left_used=self.left_usedcnt,
                 left_duplicated=self.left_duplcnt,
@@ -112,27 +107,29 @@ class TimestampJoinOp(erdos.Operator):
         self.joincnt = 0
         self.logger = utils.setup_csv_logging("timestamp completeness and cardinality",
                                               log_file=log_file)
-        self.logger.warning("left_total, left_used, left_duplicated, right_total, right_used, right_duplicated, cardinality")
-        left_stream.add_callback(self.recv_left)
-        right_stream.add_callback(self.recv_right)
+        self.logger.warning("left_total,left_used,left_duplicated,right_total,right_used,right_duplicated,cardinality")
+        left_stream.add_callback(self.recv_left, [write_stream])
+        right_stream.add_callback(self.recv_right, [write_stream])
         erdos.add_watermark_callback([left_stream, right_stream],
                                      [write_stream], self.send_joined)
 
     # TODO: use a callback on a stateful read stream instead of passing self
-    def recv_left(self, msg):
+    def recv_left(self, msg, write_stream):
         print("TimestampJoinOp: received {msg} on left stream".format(msg=msg))
         self.left_msgs[msg.timestamp] = msg
         self.left_reccnt += 1
+        self.send_joined(msg.timestamp, write_stream)
 
-    def recv_right(self, msg):
+    def recv_right(self, msg, write_stream):
         print("TimestampJoinOp: received {msg} on right stream".format(msg=msg))
         self.right_msgs[msg.timestamp] = msg
         self.right_reccnt += 1
+        self.send_joined(msg.timestamp, write_stream)
 
     def count_and_log(self):
         self.joincnt += 1
         self.logger.warning(
-            "{left_total}, {left_used}, {left_duplicated}, {right_total}, {right_used}, {right_duplicated}, {cardinality}".format(
+            "{left_total},{left_used},{left_duplicated},{right_total},{right_used},{right_duplicated},{cardinality}".format(
                 left_total=self.left_reccnt,
                 left_used=self.left_usedcnt,
                 left_duplicated=self.left_duplcnt,
@@ -169,7 +166,7 @@ class RecentNoDuplJoinOp(erdos.Operator):
         self.joincnt = 0
         self.logger = utils.setup_csv_logging("recent on dupl completeness and cardinality",
                                               log_file=log_file)
-        self.logger.warning("left_total, left_used, left_duplicated, right_total, right_used, right_duplicated, cardinality")
+        self.logger.warning("left_total,left_used,left_duplicated,right_total,right_used,right_duplicated,cardinality")
 
         left_stream.add_callback(self.recv_left, [write_stream])
         right_stream.add_callback(self.recv_right, [write_stream])
@@ -194,7 +191,7 @@ class RecentNoDuplJoinOp(erdos.Operator):
     def count_and_log(self):
         self.joincnt += 1
         self.logger.warning(
-            "{left_total}, {left_used}, {left_duplicated}, {right_total}, {right_used}, {right_duplicated}, {cardinality}".format(
+            "{left_total},{left_used},{left_duplicated},{right_total},{right_used},{right_duplicated},{cardinality}".format(
                 left_total=self.left_reccnt,
                 left_used=self.left_usedcnt,
                 left_duplicated=self.left_duplcnt,
@@ -231,7 +228,7 @@ class PermissiveRecentJoinOp(erdos.Operator):
         self.joincnt = 0
         self.logger = utils.setup_csv_logging("permissive recent completeness and cardinality",
                                               log_file=log_file)
-        self.logger.warning("left_total, left_used, left_duplicated, right_total, right_used, right_duplicated, cardinality")
+        self.logger.warning("left_total,left_used,left_duplicated,right_total,right_used,right_duplicated,cardinality")
 
         left_stream.add_callback(self.recv_left, [write_stream])
         right_stream.add_callback(self.recv_right, [write_stream])
@@ -252,7 +249,7 @@ class PermissiveRecentJoinOp(erdos.Operator):
     def count_and_log(self):
         self.joincnt += 1
         self.logger.warning(
-            "{left_total}, {left_used}, {left_duplicated}, {right_total}, {right_used}, {right_duplicated}, {cardinality}".format(
+            "{left_total},{left_used},{left_duplicated},{right_total},{right_used},{right_duplicated},{cardinality}".format(
                 left_total=self.left_reccnt,
                 left_used=self.left_usedcnt,
                 left_duplicated=self.left_duplcnt,
@@ -301,7 +298,7 @@ class MeasurementOp(erdos.Operator):
         read_stream.add_callback(self.callback, [write_stream])
         self.logger = utils.setup_csv_logging("time data",
                                               log_file=log_file)
-        self.logger.warning("timestamp, time_difference, left_recency, right_recency")
+        self.logger.warning("timestamp,time_difference,left_recency,right_recency")
 
     def callback(self, msg, write_stream):
         current_time = time.time()
@@ -317,7 +314,7 @@ class MeasurementOp(erdos.Operator):
 
         msg = erdos.Message(msg.timestamp, data)
         self.logger.warning(
-            "{timestamp}, {time_difference}, {left_recency}, {right_recency}".format(
+            "{timestamp},{time_difference},{left_recency},{right_recency}".format(
                 timestamp = timestamp,
                 time_difference=difference,
                 left_recency=left_recency,
@@ -342,8 +339,8 @@ def run_experiment(join_type, left_freq, right_freq, duration_secs=100):
     elif join_type == "PermissiveRecent":
         join = PermissiveRecentJoinOp
 
-    join_log_file = join_type + "_leftfreq_" + str(left_freq) + "_rightfreq_" + str(right_freq) + "_duration_" + str(duration_secs) + "_counts" 
-    measurement_log_file = join_type + "_leftfreq_" + str(left_freq) + "_rightfreq_" + str(right_freq) + "_duration_" + str(duration_secs) + "_times"
+    join_log_file = join_type + "_leftfreq_" + str(left_freq) + "_rightfreq_" + str(right_freq) + "_duration_" + str(duration_secs) + "_counts.csv" 
+    measurement_log_file = join_type + "_leftfreq_" + str(left_freq) + "_rightfreq_" + str(right_freq) + "_duration_" + str(duration_secs) + "_times.csv"
 
     """Creates and runs the dataflow graph."""
     (left_stream, ) = erdos.connect(SendOp,
@@ -358,7 +355,7 @@ def run_experiment(join_type, left_freq, right_freq, duration_secs=100):
     (time_stream, ) = erdos.connect(MeasurementOp,
                                     erdos.OperatorConfig(), [join_stream], log_file=measurement_log_file)
     node_handle = erdos.run_async()
-    time.sleep(15)
+    time.sleep(10)
     node_handle.shutdown()
     erdos.reset()
     return

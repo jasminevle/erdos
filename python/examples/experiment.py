@@ -271,7 +271,6 @@ class PermissiveRecentJoinOp(erdos.Operator):
         self.count_and_log()
         print("PermissiveRecentJoinOp: sending {joined_msg}".format(joined_msg=joined_msg))
         write_stream.send(joined_msg)
-        self.right_msgs = self.right_msgs[len(self.right_msgs)-1:]
 
     def send_joined_right(self, msg, write_stream):
         if len(self.left_msgs) == 0:
@@ -285,7 +284,6 @@ class PermissiveRecentJoinOp(erdos.Operator):
         self.count_and_log()
         print("PermissiveRecentJoinOp: sending {joined_msg}".format(joined_msg=joined_msg))
         write_stream.send(joined_msg)
-        self.left_msgs = self.left_msgs[len(self.left_msgs)-1:]
 
     @staticmethod
     def connect(left_stream, right_stream):

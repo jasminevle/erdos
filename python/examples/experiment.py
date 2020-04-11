@@ -260,33 +260,32 @@ class PermissiveRecentJoinOp(erdos.Operator):
                 ))
 
     def send_joined_left(self, msg, write_stream):
+        if len(self.right_msgs) == 0:
+            return
+        right_msg = self.right_msgs[len(self.right_msgs)-1]
+
         self.left_usedcnt += 1
-        index = 0
-        for right_msg in self.right_msgs:
-            self.right_duplcnt += 1
-            timestamp = msg.timestamp
-            joined_msg = erdos.Message(timestamp, (msg.data[0], msg.timestamp, right_msg.data[0], right_msg.timestamp))
-            self.count_and_log()
-            print("PermissiveRecentJoinOp: sending {joined_msg}".format(joined_msg=joined_msg))
-            write_stream.send(joined_msg)
-            if right_msg.timestamp < msg.timestamp:
-                index += 1
-        if index < len(self.right_msgs):
-            self.right_msgs = self.right_msgs[index:]
+        self.right_duplcnt += 1
+        
+        joined_msg = erdos.Message(msg.timestamp, (msg.data[0], msg.timestamp, right_msg.data[0], right_msg.timestamp))
+        self.count_and_log()
+        print("PermissiveRecentJoinOp: sending {joined_msg}".format(joined_msg=joined_msg))
+        write_stream.send(joined_msg)
+        self.right_msgs = self.right_msgs[len(self.right_msgs)-1:]
 
     def send_joined_right(self, msg, write_stream):
+        if len(self.left_msgs) == 0:
+            return
+        left_msg = self.left_msgs[len(self.left_msgs)-1]
+
         self.right_usedcnt += 1
-        for left_msg in self.left_msgs:
-            self.left_duplcnt += 1
-            timestamp = msg.timestamp
-            joined_msg = erdos.Message(timestamp, (left_msg.data[0], left_msg.timestamp, msg.data[0], msg.timestamp))
-            self.count_and_log()
-            print("PermissiveRecentJoinOp: sending {joined_msg}".format(joined_msg=joined_msg))
-            write_stream.send(joined_msg)
-            if left_msg.timestamp < msg.timestamp:
-                index += 1
-        if index < len(self.left_msgs):
-            self.left_msgs = self.left_msgs[index:]
+        self.left_duplcnt += 1
+
+        joined_msg = erdos.Message(msg.timestamp, (left_msg.data[0], left_msg.timestamp, msg.data[0], msg.timestamp))
+        self.count_and_log()
+        print("PermissiveRecentJoinOp: sending {joined_msg}".format(joined_msg=joined_msg))
+        write_stream.send(joined_msg)
+        self.left_msgs = self.left_msgs[len(self.left_msgs)-1:]
 
     @staticmethod
     def connect(left_stream, right_stream):
@@ -361,7 +360,7 @@ def run_experiment(join_type, left_freq, right_freq, duration_secs=100):
     return
 
 def main():
-    join_types = ["Timestamp", "RecentNoDupl", "PermissiveRecent", "MostPermissive"]
+    join_types = ["MostPermissive", "Timestamp", "RecentNoDupl", "PermissiveRecent"]
     for join_type in join_types:
         for left_freq in range(1, 11):
             for right_freq in range(left_freq, 11):
